@@ -7,6 +7,7 @@
 //   4'd02 : SUB  -- subtracao com sinal  (BEQ usa Zero)
 //   4'd04 : OR   -- OU bit a bit
 //   4'd05 : AND  -- E bit a bit
+//   4'd06 : XOR  -- XOR bit a bit
 //   4'd11 : SLT  -- set-less-than com sinal
 // =============================================================================
 
@@ -26,6 +27,7 @@ module pl_alu (
             4'd02:   ALUResult = $signed(SrcA) - $signed(SrcB);
             4'd04:   ALUResult = SrcA | SrcB;
             4'd05:   ALUResult = SrcA & SrcB;
+            4'd06:  ALUResult = SrcA ^ SrcB;   // XOR bit a bit entre os dois operandos
             4'd11:   ALUResult = 32'($signed(SrcA) < $signed(SrcB));
             default: ALUResult = 32'b0;
         endcase
