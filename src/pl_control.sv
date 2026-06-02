@@ -6,22 +6,23 @@
 // que serao propagados pelos registradores de pipeline.
 //
 // Instrucoes suportadas:
-//   R-type  (0110011): add, and
+//   R-type  (0110011): add, sub, or, and, slt, xor, sll, srl, sra, sltu
 //   I-type  (0000011): lw
+//   I-type  (0010011): addi, andi, ori, slti, slli, srli, srai  <- Etapa 01
 //   S-type  (0100011): sw
 //   B-type  (1100011): beq
 //
 // Tabela de sinais de controle:
-//   Sinal     | R-type | lw | sw | beq
-//   ----------|--------|----|----|-----
-//   ALUSrc    |   0    |  1 |  1 |  0    0=reg, 1=imm
-//   MemtoReg  |   0    |  1 |  - |  -    0=ALU, 1=mem
-//   RegWrite  |   1    |  1 |  0 |  0
-//   MemRead   |   0    |  1 |  0 |  0
-//   MemWrite  |   0    |  0 |  1 |  0
-//   Branch    |   0    |  0 |  0 |  1
-//   ALUOp[1]  |   1    |  0 |  0 |  0
-//   ALUOp[0]  |   0    |  0 |  0 |  1
+//   Sinal     | R-type | lw | I-arith | sw | beq
+//   ----------|--------|----|---------|----|-----
+//   ALUSrc    |   0    |  1 |    1    |  1 |  0    0=reg, 1=imm
+//   MemtoReg  |   0    |  1 |    0    |  - |  -    0=ALU, 1=mem
+//   RegWrite  |   1    |  1 |    1    |  0 |  0
+//   MemRead   |   0    |  1 |    0    |  0 |  0
+//   MemWrite  |   0    |  0 |    0    |  1 |  0
+//   Branch    |   0    |  0 |    0    |  0 |  1
+//   ALUOp[1]  |   1    |  0 |    1    |  0 |  0
+//   ALUOp[0]  |   0    |  0 |    1    |  0 |  1
 // =============================================================================
 
 `timescale 1ns / 1ps
@@ -37,10 +38,11 @@ module pl_control (
     output logic [1:0] ALUOp
 );
 
-    localparam R_TYPE = 7'b0110011;
-    localparam LOAD   = 7'b0000011;
-    localparam STORE  = 7'b0100011;
-    localparam BRANCH = 7'b1100011;
+    localparam R_TYPE  = 7'b0110011;
+    localparam LOAD    = 7'b0000011;
+    localparam I_ARITH = 7'b0010011;   // Etapa 01: addi, andi, ori, slti, slli, srli, srai
+    localparam STORE   = 7'b0100011;
+    localparam BRANCH  = 7'b1100011;
 
     always_comb begin
         ALUSrc   = 1'b0;
@@ -64,6 +66,12 @@ module pl_control (
                 RegWrite = 1'b1;
                 MemRead  = 1'b1;
                 ALUOp    = 2'b00;
+            end
+            I_ARITH: begin             // Etapa 01
+                ALUSrc   = 1'b1;       // SrcB vem do imediato
+                MemtoReg = 1'b0;       // resultado vem da ALU
+                RegWrite = 1'b1;       // escreve em rd
+                ALUOp    = 2'b11;      // pl_alu_ctrl decodifica via Funct3
             end
             STORE: begin
                 ALUSrc   = 1'b1;
