@@ -315,11 +315,13 @@ module pl_datapath (
     assign mmio_sel = ex_mem.alu_result[10];
 
     pl_dmem dmem (
-        .clk       (clk),
-        .MemWrite  (ex_mem.mem_write & ~mmio_sel),
-        .addr      (ex_mem.alu_result[9:2]),
-        .WriteData (ex_mem.write_data),
-        .ReadData  (dmem_rd)
+        .clk         (clk),
+        .MemWrite    (ex_mem.mem_write & ~mmio_sel),
+        .addr        (ex_mem.alu_result[9:2]),
+        .byte_offset (ex_mem.alu_result[1:0]),  // bits [1:0] para SB/SH
+        .funct3      (ex_mem.funct3),            // 000=SB, 001=SH, 010=SW
+        .WriteData   (ex_mem.write_data),
+        .ReadData    (dmem_rd)
     );
 
     pl_mmio mmio (
