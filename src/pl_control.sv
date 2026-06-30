@@ -1,142 +1,154 @@
 // =============================================================================
 // pl_control.sv
-// Unidade de Controle Principal -- RV32I pipelined (P&H secao 4.4)
-// Etapa 01
+// Unidade de Controle Principal -- RV32I pipelined
+//
 // Decodifica o opcode de 7 bits (estagio ID) e gera os sinais de controle
 // que serao propagados pelos registradores de pipeline.
 //
-// Instrucoes suportadas:
-//   R-type  (0110011): add, sub, or, and, slt, xor, sll, srl, sra, sltu
-//   I-type  (0000011): lw
-//   I-type  (0010011): addi, andi, ori, slti, slli, srli, srai  <- Etapa 01
-//   S-type  (0100011): sw
-//   B-type  (1100011): beq
+// Suporte original mantido: ADD/SUB/AND/OR/SLT, LW, SW, BEQ.
 //
-// Tabela de sinais de controle:
-//   Sinal     | R-type | lw | I-arith | sw | beq
-//   ----------|--------|----|---------|----|-----
-//   ALUSrc    |   0    |  1 |    1    |  1 |  0    0=reg, 1=imm
-//   MemtoReg  |   0    |  1 |    0    |  - |  -    0=ALU, 1=mem
-//   RegWrite  |   1    |  1 |    1    |  0 |  0
-//   MemRead   |   0    |  1 |    0    |  0 |  0
-//   MemWrite  |   0    |  0 |    0    |  1 |  0
-//   Branch    |   0    |  0 |    0    |  0 |  1
-//   ALUOp[1]  |   1    |  0 |    1    |  0 |  0
-//   ALUOp[0]  |   0    |  0 |    1    |  0 |  1
-// =============================================================================
-// Sinais novos (Etapa 02):
-//   Jump       : desvio incondicional (JAL/JALR) — forca pc_src=1
-//   JumpReg    : JALR — alvo = rs1+imm em vez de PC+imm
-//   UsePC      : AUIPC — SrcA recebe PC no estagio EX
-//   LuiPass    : LUI  — resultado = imm_ext (ignora ALU)
-//   JumpResult : JAL/JALR — rd recebe PC+4
+// ADICIONADO - Etapa 1:
+//   R-type: XOR, SLL, SRL, SRA, SLTU
+//   I-type aritmetico: ADDI, ANDI, ORI, SLTI, SLLI, SRLI, SRAI
 //
-// Loads/stores parciais (LB/LH/LBU/LHU, SB/SH) usam o mesmo opcode e
-// sinais de LW/SW. A largura e tratada no datapath via funct3.
-// Branches extras (BNE/BLT/BGE/BLTU/BGEU) usam o mesmo opcode de BEQ.
+// ADICIONADO - Etapa 2:
+//   Load: LB, LH, LBU, LHU  (LW mantido)
+//   Store: SB, SH           (SW mantido)
+//   Branch: BNE, BLT, BGE, BLTU, BGEU  (BEQ mantido)
+//   Jump: JAL, JALR
+//   U-type: LUI, AUIPC
+//
+// Sinais adicionados:
+//   ALUASrc[1:0]  00=rs1/forwarding, 01=PC, 10=zero
+//   ResultSrc[1:0] 00=ALU, 01=memoria, 10=PC+4
+//   Jump          JAL
+//   Jalr          JALR
 // =============================================================================
 
 `timescale 1ns / 1ps
 
 module pl_control (
     input  logic [6:0] Opcode,
+    output logic [1:0] ALUASrc,
     output logic       ALUSrc,
-    output logic       MemtoReg,
+    output logic [1:0] ResultSrc,
     output logic       RegWrite,
     output logic       MemRead,
     output logic       MemWrite,
     output logic       Branch,
-    output logic [1:0] ALUOp,
-    // sinais novos — Etapa 02
     output logic       Jump,
-    output logic       JumpReg,
-    output logic       UsePC,
-    output logic       LuiPass,
-    output logic       JumpResult
+    output logic       Jalr,
+    output logic [1:0] ALUOp
 );
 
     localparam R_TYPE  = 7'b0110011;
-    localparam LOAD    = 7'b0000011;  // LW, LB, LH, LBU, LHU
-    localparam I_ARITH = 7'b0010011;  //  Etapa 01: addi, andi, ori, slti, slli, srai
-    localparam STORE   = 7'b0100011;  // SW, SB, SH
-    localparam BRANCH  = 7'b1100011;  // BEQ, BNE, BLT, BGE, BLTU, BGEU
+    localparam I_ARITH = 7'b0010011;
+    localparam LOAD    = 7'b0000011;
+    localparam STORE   = 7'b0100011;
+    localparam BRANCH  = 7'b1100011;
     localparam JAL     = 7'b1101111;
     localparam JALR    = 7'b1100111;
     localparam LUI     = 7'b0110111;
     localparam AUIPC   = 7'b0010111;
 
     always_comb begin
-        ALUSrc     = 1'b0;
-        MemtoReg   = 1'b0;
-        RegWrite   = 1'b0;
-        MemRead    = 1'b0;
-        MemWrite   = 1'b0;
-        Branch     = 1'b0;
-        ALUOp      = 2'b00;
-        Jump       = 1'b0; // desvio incondicional
-        JumpReg    = 1'b0; 
-        UsePC      = 1'b0;
-        LuiPass    = 1'b0;
-        JumpResult = 1'b0; //rd = PC + 4
+        ALUASrc   = 2'b00;
+        ALUSrc    = 1'b0;
+        ResultSrc = 2'b00;
+        RegWrite  = 1'b0;
+        MemRead   = 1'b0;
+        MemWrite  = 1'b0;
+        Branch    = 1'b0;
+        Jump      = 1'b0;
+        Jalr      = 1'b0;
+        ALUOp     = 2'b00;
 
         case (Opcode)
             R_TYPE: begin
-                // ALUSrc   = 1'b0;
-                // MemtoReg = 1'b0;
-                RegWrite = 1'b1;
-                ALUOp    = 2'b10;
+                ALUASrc   = 2'b00; // rs1
+                ALUSrc    = 1'b0;  // rs2
+                ResultSrc = 2'b00; // ALU
+                RegWrite  = 1'b1;
+                ALUOp     = 2'b10;
             end
+
+            // -----------------------------------------------------------------
+            // ADICIONADO - Etapa 1: ADDI, ANDI, ORI, SLTI, SLLI, SRLI, SRAI.
+            // -----------------------------------------------------------------
+            I_ARITH: begin
+                ALUASrc   = 2'b00; // rs1
+                ALUSrc    = 1'b1;  // imediato I
+                ResultSrc = 2'b00; // ALU
+                RegWrite  = 1'b1;
+                ALUOp     = 2'b11;
+            end
+
             LOAD: begin
-                ALUSrc   = 1'b1;
-                MemtoReg = 1'b1;
-                RegWrite = 1'b1;
-                MemRead  = 1'b1;
-                // ALUOp    = 2'b00;
+                ALUASrc   = 2'b00; // rs1 + imm
+                ALUSrc    = 1'b1;
+                ResultSrc = 2'b01; // memoria
+                RegWrite  = 1'b1;
+                MemRead   = 1'b1;
+                ALUOp     = 2'b00;
             end
-            I_ARITH: begin             // Etapa 01
-                ALUSrc   = 1'b1;       // SrcB vem do imediato
-                // MemtoReg = 1'b0;      
-                RegWrite = 1'b1;       // escreve em rd
-                ALUOp    = 2'b11;      // pl_alu_ctrl decodifica via Funct3
-            end
+
             STORE: begin
-                ALUSrc   = 1'b1;
-                MemWrite = 1'b1;
-                ALUOp    = 2'b00; // ADD para calcular o endereço
+                ALUASrc   = 2'b00; // rs1 + imm
+                ALUSrc    = 1'b1;
+                MemWrite  = 1'b1;
+                ALUOp     = 2'b00;
             end
+
             BRANCH: begin
-                Branch   = 1'b1;
-                ALUOp    = 2'b01;
+                Branch    = 1'b1;
+                ALUOp     = 2'b01;
             end
 
+            // -----------------------------------------------------------------
+            // ADICIONADO - Etapa 2: JAL escreve PC+4 e desvia para PC+imm.
+            // -----------------------------------------------------------------
             JAL: begin
-                RegWrite   = 1'b1;
-                Jump       = 1'b1;  // desvio incondicional
-                JumpResult = 1'b1;  // rd = PC+4
-                ALUOp      = 2'b00;
+                ResultSrc = 2'b10; // PC+4
+                RegWrite  = 1'b1;
+                Jump      = 1'b1;
+                ALUOp     = 2'b00;
             end
 
+            // -----------------------------------------------------------------
+            // ADICIONADO - Etapa 2: JALR escreve PC+4 e desvia para (rs1+imm)&~1.
+            // -----------------------------------------------------------------
             JALR: begin
-                ALUSrc     = 1'b1;  // SrcB = imm (calcula rs1+imm)
-                RegWrite   = 1'b1;
-                Jump       = 1'b1;
-                JumpReg    = 1'b1;  // alvo = rs1+imm
-                JumpResult = 1'b1;  // rd = PC+4
-                ALUOp      = 2'b00;
+                ALUASrc   = 2'b00; // rs1
+                ALUSrc    = 1'b1;  // imediato I
+                ResultSrc = 2'b10; // PC+4
+                RegWrite  = 1'b1;
+                Jalr      = 1'b1;
+                ALUOp     = 2'b00;
             end
 
+            // -----------------------------------------------------------------
+            // ADICIONADO - Etapa 2: LUI escreve o imediato U diretamente.
+            // Implementacao: ALU = 0 + imm_U.
+            // -----------------------------------------------------------------
             LUI: begin
-                ALUSrc   = 1'b1;
-                RegWrite = 1'b1;
-                LuiPass  = 1'b1;    // resultado = imm_ext diretamente
+                ALUASrc   = 2'b10; // zero
+                ALUSrc    = 1'b1;  // imediato U
+                ResultSrc = 2'b00; // ALU
+                RegWrite  = 1'b1;
+                ALUOp     = 2'b00;
             end
 
+            // -----------------------------------------------------------------
+            // ADICIONADO - Etapa 2: AUIPC escreve PC + imediato U.
+            // -----------------------------------------------------------------
             AUIPC: begin
-                ALUSrc   = 1'b1;
-                RegWrite = 1'b1;
-                UsePC    = 1'b1;    // SrcA = PC
-                ALUOp    = 2'b00;   // ADD: PC + imm
+                ALUASrc   = 2'b01; // PC
+                ALUSrc    = 1'b1;  // imediato U
+                ResultSrc = 2'b00; // ALU
+                RegWrite  = 1'b1;
+                ALUOp     = 2'b00;
             end
+
             default: ; // sinais permanecem em zero (seguro)
         endcase
     end
