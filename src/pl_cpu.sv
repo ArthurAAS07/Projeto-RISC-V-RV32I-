@@ -6,13 +6,6 @@
 //   pl_control  : unidade de controle principal (estagio ID)
 //   pl_alu_ctrl : unidade de controle da ALU    (estagio EX)
 //   pl_datapath : datapath de 5 estagios
-//
-// O pl_control decodifica o opcode do estagio ID; os sinais de controle
-// resultantes sao propagados internamente pelo pl_datapath atraves dos
-// registradores de pipeline.
-//
-// O pl_alu_ctrl usa os campos Funct3/Funct7/ALUOp do registrador ID/EX
-// (estagio EX) para determinar a operacao da ALU.
 // =============================================================================
 
 `timescale 1ns / 1ps
@@ -45,7 +38,14 @@ module pl_cpu (
     // -------------------------------------------------------------------------
     logic [6:0] opcode;
 
-    logic       ALUSrc, MemtoReg, RegWrite, MemRead, MemWrite, Branch;
+    // -------------------------------------------------------------------------
+    // ADICIONADO - Etapa 1/2: novos sinais de controle para I-type, jumps e U-type.
+    // ALUASrc seleciona rs1/PC/zero; ResultSrc seleciona ALU/mem/PC+4.
+    // -------------------------------------------------------------------------
+    logic [1:0] ALUASrc;
+    logic       ALUSrc;
+    logic [1:0] ResultSrc;
+    logic       RegWrite, MemRead, MemWrite, Branch, Jump, Jalr;
     logic [1:0] ALUOp;
 
     logic [2:0] funct3_ex;
@@ -57,14 +57,17 @@ module pl_cpu (
     // Unidade de controle principal (estagio ID)
     // -------------------------------------------------------------------------
     pl_control ctrl (
-        .Opcode   (opcode),
-        .ALUSrc   (ALUSrc),
-        .MemtoReg (MemtoReg),
-        .RegWrite (RegWrite),
-        .MemRead  (MemRead),
-        .MemWrite (MemWrite),
-        .Branch   (Branch),
-        .ALUOp    (ALUOp)
+        .Opcode    (opcode),
+        .ALUASrc   (ALUASrc),
+        .ALUSrc    (ALUSrc),
+        .ResultSrc (ResultSrc),
+        .RegWrite  (RegWrite),
+        .MemRead   (MemRead),
+        .MemWrite  (MemWrite),
+        .Branch    (Branch),
+        .Jump      (Jump),
+        .Jalr      (Jalr),
+        .ALUOp     (ALUOp)
     );
 
     // -------------------------------------------------------------------------
@@ -83,12 +86,15 @@ module pl_cpu (
     pl_datapath datapath (
         .clk          (clk),
         .rst_n        (rst_n),
+        .ALUASrc      (ALUASrc),
         .ALUSrc       (ALUSrc),
-        .MemtoReg     (MemtoReg),
+        .ResultSrc    (ResultSrc),
         .RegWrite     (RegWrite),
         .MemRead      (MemRead),
         .MemWrite     (MemWrite),
         .Branch       (Branch),
+        .Jump         (Jump),
+        .Jalr         (Jalr),
         .ALUOp        (ALUOp),
         .ALU_CC       (alu_cc),
         .Opcode       (opcode),
