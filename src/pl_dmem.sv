@@ -6,14 +6,9 @@
 // Init file  : data.mif   (sintese Quartus)
 //              data.hex   (simulacao ModelSim via $readmemh)
 //
-// Leitura  : assincrona (combinatorial) -- disponivel no estagio MEM
-// Escrita  : sincrona (posedge clk, gated por MemWrite & ~mmio_sel)
-// Endereco : alu_result[9:2]  (endereco de palavra de 8 bits)
-//
-// Instrucoes de store suportadas (via funct3):
-//   funct3 = 3'b000 : SB -- escreve 1 byte  (byte selecionado por byte_offset)
-//   funct3 = 3'b001 : SH -- escreve 2 bytes (halfword selecionada por byte_offset[1])
-//   funct3 = 3'b010 : SW -- escreve 4 bytes (comportamento original)
+// Leitura  : assincrona (combinatorial) -- devolve a palavra de 32 bits.
+// Escrita  : sincrona (posedge clk), com suporte a byte/half/word.
+// Endereco : addr = alu_result[9:2] e byte_offset = alu_result[1:0].
 // =============================================================================
 
 `timescale 1ns / 1ps
@@ -22,8 +17,15 @@ module pl_dmem (
     input  logic        clk,
     input  logic        MemWrite,
     input  logic [7:0]  addr,
-    input  logic [1:0]  byte_offset,  // bits [1:0] do endereco -- seleciona byte/halfword
-    input  logic [2:0]  funct3,       // 000=SB, 001=SH, 010=SW
+
+    // -------------------------------------------------------------------------
+    // ADICIONADO - Etapa 2: suporte a SB, SH e SW.
+    // byte_offset seleciona o byte dentro da palavra de 32 bits.
+    // funct3 identifica o tamanho do store: 000=SB, 001=SH, 010=SW.
+    // -------------------------------------------------------------------------
+    input  logic [1:0]  byte_offset,
+    input  logic [2:0]  funct3,
+
     input  logic [31:0] WriteData,
     output logic [31:0] ReadData
 );
@@ -37,25 +39,36 @@ module pl_dmem (
     end
     // synthesis translate_on
 
-    always@(posedge clk) begin
+    always_ff @(posedge clk) begin
         if (MemWrite) begin
             case (funct3)
-                3'b000: begin // SB -- escreve apenas 1 byte
+                // -------------------------------------------------------------
+                // ADICIONADO - Etapa 2: SB (store byte), little-endian.
+                // -------------------------------------------------------------
+                3'b000: begin
                     case (byte_offset)
-                        2'b00: ram[addr][ 7: 0] <= WriteData[7:0];
-                        2'b01: ram[addr][15: 8] <= WriteData[7:0];
+                        2'b00: ram[addr][7:0]   <= WriteData[7:0];
+                        2'b01: ram[addr][15:8]  <= WriteData[7:0];
                         2'b10: ram[addr][23:16] <= WriteData[7:0];
                         2'b11: ram[addr][31:24] <= WriteData[7:0];
                     endcase
                 end
-                3'b001: begin // SH -- escreve halfword (2 bytes)
-                    case (byte_offset[1])
-                        1'b0: ram[addr][15: 0] <= WriteData[15:0];
-                        1'b1: ram[addr][31:16] <= WriteData[15:0];
-                    endcase
+
+                // -------------------------------------------------------------
+                // ADICIONADO - Etapa 2: SH (store halfword), little-endian.
+                // Enderecos alinhados em 0 ou 2 sao os casos esperados.
+                // -------------------------------------------------------------
+                3'b001: begin
+                    if (byte_offset[1])
+                        ram[addr][31:16] <= WriteData[15:0];
+                    else
+                        ram[addr][15:0]  <= WriteData[15:0];
                 end
-                default: // SW (funct3=010) -- escreve palavra inteira (original)
-                    ram[addr] <= WriteData;
+
+                // SW original mantido.
+                3'b010: ram[addr] <= WriteData;
+
+                default: ram[addr] <= WriteData;
             endcase
         end
     end
